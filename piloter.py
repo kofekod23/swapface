@@ -41,6 +41,7 @@ def regler_workflow(workflow, video, visage, options):
     """Injecte les reglages dans le graphe. Fonction pure, testee par --autotest."""
     workflow["1"]["inputs"]["video"] = video
     workflow["1"]["inputs"]["frame_load_cap"] = options["images"]
+    workflow["1"]["inputs"]["skip_first_frames"] = options["depart"]
     workflow["1"]["inputs"]["custom_width"] = options["largeur"]
     workflow["1"]["inputs"]["custom_height"] = options["hauteur"]
     workflow["2"]["inputs"]["image"] = visage
@@ -160,11 +161,13 @@ def autotest():
         charger_workflow(),
         "a.mp4",
         "b.jpg",
-        {"images": 12, "largeur": 640, "hauteur": 360, "modele": "inswapper_128.onnx",
+        {"images": 12, "depart": 90, "largeur": 640, "hauteur": 360,
+         "modele": "inswapper_128.onnx",
          "restauration": "codeformer-v0.1.0.pth", "poids": 0.4, "fps": 30.0},
     )
     assert workflow["1"]["inputs"]["video"] == "a.mp4"
     assert workflow["1"]["inputs"]["frame_load_cap"] == 12
+    assert workflow["1"]["inputs"]["skip_first_frames"] == 90
     assert workflow["1"]["inputs"]["custom_width"] == 640
     assert workflow["2"]["inputs"]["image"] == "b.jpg"
     assert workflow["3"]["inputs"]["swap_model"] == "inswapper_128.onnx"
@@ -178,7 +181,8 @@ def autotest():
 
     muet = regler_workflow(
         charger_workflow(), "a.mp4", "b.jpg",
-        {"images": 5, "largeur": 640, "hauteur": 360, "modele": "inswapper_128.onnx",
+        {"images": 5, "depart": 0, "largeur": 640, "hauteur": 360,
+         "modele": "inswapper_128.onnx",
          "restauration": "none", "poids": 0.7, "fps": 25.0, "sans_audio": True},
     )
     assert "audio" not in muet["4"]["inputs"]
@@ -207,6 +211,8 @@ def main():
                            help="codeformer_weight, entre 0 et 1")
     analyseur.add_argument("--images", type=int, default=30,
                            help="frame_load_cap, 0 pour tout charger")
+    analyseur.add_argument("--depart", type=int, default=0,
+                           help="skip_first_frames, image de depart")
     analyseur.add_argument("--largeur", type=int, default=1280)
     analyseur.add_argument("--hauteur", type=int, default=720)
     analyseur.add_argument("--fps", type=float, default=None,
@@ -251,7 +257,8 @@ def main():
 
     workflow = regler_workflow(
         charger_workflow(), nom_video, nom_visage,
-        {"images": arguments.images, "largeur": arguments.largeur,
+        {"images": arguments.images, "depart": arguments.depart,
+         "largeur": arguments.largeur,
          "hauteur": arguments.hauteur, "modele": arguments.modele,
          "restauration": arguments.restauration, "poids": arguments.poids,
          "fps": fps, "sans_audio": arguments.sans_audio or not audio_present},
