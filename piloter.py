@@ -278,12 +278,20 @@ def main():
     serveur = arguments.serveur.rstrip("/")
     session = requests.Session()
 
-    print(f"Serveur : {serveur}")
+    # flush explicite : sans lui, la sortie standard est tamponnee quand elle est
+    # redirigee, et le message d'erreur de stderr apparait avant cette ligne.
+    print(f"Serveur : {serveur}", flush=True)
     try:
         session.get(f"{serveur}/system_stats", timeout=30).raise_for_status()
     except Exception as erreur:
+        sys.stdout.flush()
         print(f"Serveur injoignable : {erreur}", file=sys.stderr)
-        print("En local, demarre-le avec : python3 lancer.py", file=sys.stderr)
+        if "530" in str(erreur) or "1033" in str(erreur):
+            print("Code 530 ou 1033 : le tunnel n'est plus connecte. "
+                  "Relance ouvrir_tunnel() dans le notebook, l'URL changera.",
+                  file=sys.stderr)
+        elif serveur.startswith("http://127.0.0.1"):
+            print("En local, demarre-le avec : python3 lancer.py", file=sys.stderr)
         return 2
 
     catalogue = fichiers_serveur(session, serveur)
