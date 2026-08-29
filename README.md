@@ -264,9 +264,38 @@ Sec-Fetch-Site: cross-site                  403
 Sec-Fetch-Site: none, ouverture d'onglet    200
 ```
 
-Ouvre donc l'URL du tunnel **directement dans un onglet**, jamais dans un cadre
-integre. Le contournement existe, `--enable-cors-header`, mais il desactive la
-protection pour tout le monde sur une URL deja publique.
+Attention, **cliquer sur le lien affiche dans Colab produit le meme 403** : une
+navigation declenchee par un clic depuis un autre site est elle aussi
+`cross-site`. Copie l'adresse et colle-la dans la barre d'adresse d'un onglet
+neuf, une saisie manuelle envoie `Sec-Fetch-Site: none`.
+
+Le contournement existe, `--enable-cors-header`, mais il desactive la protection
+pour tout le monde sur une URL deja publique.
+
+### DNS_PROBE_FINISHED_NXDOMAIN sur l'URL du tunnel
+
+Chaque tunnel rapide cree son enregistrement DNS a la volee, il n'y a pas de
+joker sur `trycloudflare.com`. Un resolveur qui a interroge une seconde trop tot
+met le refus en cache et s'y tient.
+
+Constate sur une box grand public :
+
+```
+resolveur de la box         aucune reponse
+1.1.1.1 et 8.8.8.8          104.16.230.132, 104.16.231.132
+requete en forcant l'IP     200
+```
+
+Le tunnel fonctionne, c'est la resolution du nom qui echoue. Passe ton Mac sur un
+resolveur public :
+
+```bash
+sudo networksetup -setdnsservers Wi-Fi 1.1.1.1 8.8.8.8
+sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder
+```
+
+`sudo networksetup -setdnsservers Wi-Fi empty` rend la main a la box. Pour le
+navigateur seul et sans mot de passe, le DNS securise de Chrome suffit.
 
 > Une URL `trycloudflare.com` est publique et sans mot de passe. Quiconque la
 > connait peut mettre des taches dans ta file, envoyer des fichiers et lire tes
