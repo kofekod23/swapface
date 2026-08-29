@@ -301,6 +301,27 @@ navigateur seul et sans mot de passe, le DNS securise de Chrome suffit.
 > connait peut mettre des taches dans ta file, envoyer des fichiers et lire tes
 > rendus. Ne la publie pas, et arrete le tunnel quand tu as fini.
 
+### L'interface met des minutes a s'afficher, ou reste sur le logo
+
+Ce sont les vignettes de la galerie de modeles de workflow de ComfyUI. Pesee
+dans une installation locale :
+
+```
+766 fichiers image et video      483 Mo
+documentation embarquee           49 Mo
+```
+
+Un tunnel rapide Cloudflare plafonne a 200 requetes simultanees et chaque
+aller-retour traverse le reseau Cloudflare. Cette galerie ne finit jamais.
+
+Deux mesures, toutes deux appliquees par le notebook :
+
+- `Comfy.TutorialCompleted` a `true` dans
+  `ComfyUI/user/default/comfy.settings.json`, la galerie ne s'ouvre plus au
+  demarrage. Sinon, `Echap` ferme la boite de dialogue, le canevas est derriere.
+- `--enable-compress-response-body` au lancement du serveur. `object_info` pese
+  1,8 Mo brut et 197 Ko compresse, c'est la reponse la plus lourde du demarrage.
+
 ### Le GPU semble inactif
 
 Le panneau de ressources de Colab affiche de la **memoire**, pas de
