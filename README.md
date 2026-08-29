@@ -148,7 +148,7 @@ hyperswap_1a_256                      2       42        5 %
 CodeFormer sous MPS : aucun repli, 100 % Metal
 ```
 
-Reproduire : `python3 diag_metal.py`
+Reproduire : `python3 diag_gpu.py`
 
 ReActor demande le provider CoreML sans options, et onnxruntime retombe alors
 sur le format `NeuralNetwork`, qui couvre bien moins d'operateurs. Dans cet etat
@@ -167,26 +167,38 @@ ComfyUI-ReActor. `--etat` dit ou tu en es, `--restaurer` annule.
 | MacBook Pro M5 | 369 ms par image | 703 ms par image |
 | Colab A100 40 Go | 1084 ms par image | 1153 ms par image |
 
-Ces chiffres Colab sont **a considerer comme faux**. Pendant ces rendus le GPU
-de la session n'a montre aucune activite : ReActor tournait sur le processeur.
-La cause probable est `onnxruntime` installe en version processeur au lieu de
-`onnxruntime-gpu`, auquel cas `CUDAExecutionProvider` n'existe pas et le
-provider retombe silencieusement sur le CPU.
+Ces chiffres Colab sont **faux**, et la raison merite d'etre connue.
 
-Verifie avant de conclure quoi que ce soit sur ta session :
+Pendant ces rendus le GPU de la session n'a montre aucune activite. Le paquet
+`onnxruntime-gpu` etait pourtant bien installe, et `get_available_providers()`
+retournait bien :
 
-```python
-import onnxruntime as ort
-print(ort.get_available_providers())   # doit contenir CUDAExecutionProvider
+```
+['TensorrtExecutionProvider', 'CUDAExecutionProvider', 'CPUExecutionProvider']
 ```
 
-La liste des providers est figee au demarrage du processus : si tu corriges
-l'installation, relance ComfyUI.
+Mais cette fonction liste ce que la roue **sait faire**, pas ce qui **s'initialise**.
+En creant reellement une session, le verdict tombe :
+
+```
+providers effectifs : ['CPUExecutionProvider']
+396,3 ms par inference
+```
+
+`CUDAExecutionProvider` echoue a l'initialisation et onnxruntime bascule sur le
+processeur sans lever d'erreur. Sur Colab, la cause est que `onnxruntime-gpu`
+cherche `libcudnn` et `libcublas` dans les chemins systeme, alors qu'elles y
+arrivent par les paquets pip de PyTorch, dans `site-packages/nvidia/*/lib`.
+Le notebook transmet desormais ces dossiers a ComfyUI par `LD_LIBRARY_PATH`.
+
+C'est exactement le meme piege que CoreML sur Mac, ou le provider etait annonce,
+accepte, et ne prenait aucun noeud sur `hyperswap_1a_256`. **La seule preuve est
+le temps mesure.** `diag_gpu.py` fait cette verification sur les deux plateformes.
 
 Ce qui reste vrai sans dependre de ce point : le decodage video, le recadrage,
 le collage et l'encodage tournent sur le processeur quoi qu'il arrive, et les
 deux vCPU d'une session Colab sont plus lents que les dix coeurs d'une M5. Le
-GPU distant n'aide que sur la part modele, qui n'est pas dominante a 360p.
+GPU distant n'aide que sur la part modele.
 
 ## Reglages
 
@@ -208,7 +220,7 @@ GPU distant n'aide que sur la part modele, qui n'est pas dominante a 360p.
 | `telecharger_modeles.py` | recupere ce que `install.py` ne pose pas |
 | `optimiser_coreml.py` | patch `MLProgram`, applique, restaure, ou dit son etat |
 | `bench.py` | temps d'inference, CoreML contre CPU, CodeFormer sur MPS |
-| `diag_metal.py` | quels noeuds tournent vraiment sur Metal |
+| `diag_gpu.py` | quels noeuds tournent vraiment sur l'accelerateur, Metal ou CUDA |
 | `workflow.json` | le graphe au format API |
 | `colab_swapface.ipynb` | installation, GPU et tunnel cote Colab |
 
