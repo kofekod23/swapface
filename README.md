@@ -75,8 +75,9 @@ L'interface web est sur http://127.0.0.1:8188.
 | option | defaut | role |
 |---|---|---|
 | `--serveur` | `http://127.0.0.1:8188` | adresse de ComfyUI, locale ou tunnel |
-| `--video` | | video source |
-| `--visage` | | image du visage a poser |
+| `--lister` | | affiche les fichiers deja sur le serveur, puis sort |
+| `--video` | | chemin local a televerser, **ou** nom deja present sur le serveur |
+| `--visage` | | chemin local a televerser, **ou** nom deja present sur le serveur |
 | `--sortie` | `rendu.mp4` | fichier a ecrire |
 | `--modele` | `hyperswap_1a_256.onnx` | ou `inswapper_128.onnx` |
 | `--restauration` | `none` | ou `codeformer-v0.1.0.pth` |
@@ -89,6 +90,22 @@ L'interface web est sur http://127.0.0.1:8188.
 
 `--largeur 0 --hauteur 0` est presque toujours le bon choix : agrandir une source
 360p avant le swap ne cree aucun detail.
+
+`--video` et `--visage` acceptent indifferemment un chemin local, qui sera alors
+televerse, ou le nom d'un fichier deja en place sur le serveur, par exemple
+televerse depuis l'interface. Rien a retaper en dur, et rien a renvoyer deux
+fois. La comparaison ignore la casse et le chemin, pratique pour les noms venus
+d'un telephone. Si le nom est inconnu, le script liste ce qui existe au lieu
+d'echouer sechement.
+
+`--lister` montre ce que le serveur propose :
+
+```bash
+python3 piloter.py --serveur https://xxx.trycloudflare.com --lister
+```
+
+Attention, quand la video n'existe que sur le serveur, le script ne peut pas en
+lire la cadence : precise `--fps`, sinon il retombe sur 25 et l'audio se decale.
 
 ## Choisir un plan
 

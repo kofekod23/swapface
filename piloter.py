@@ -90,12 +90,56 @@ def a_une_piste_audio(chemin):
     return bool(re.search(r"Stream #\d+:\d+.*: Audio:", sortie))
 
 
+def fichiers_serveur(session, serveur):
+    """Ce que le serveur propose deja dans ses listes deroulantes.
+    On lit les noeuds eux-memes plutot qu'un dossier : c'est la meme source que
+    l'interface, donc on ne peut pas se tromper de nom."""
+    catalogue = {}
+    for noeud, cle, etiquette in (("VHS_LoadVideo", "video", "videos"),
+                                  ("LoadImage", "image", "images")):
+        try:
+            reponse = session.get(f"{serveur}/object_info/{noeud}", timeout=60)
+            reponse.raise_for_status()
+            catalogue[etiquette] = list(
+                reponse.json()[noeud]["input"]["required"][cle][0]
+            )
+        except Exception:
+            catalogue[etiquette] = []
+    return catalogue
+
+
+def resoudre(session, serveur, valeur, etiquette, catalogue):
+    """Un chemin local est televerse. Sinon on cherche le nom sur le serveur.
+    Evite de renvoyer un fichier deja en place, et de retaper des noms en dur."""
+    chemin = Path(valeur).expanduser()
+    if chemin.is_file():
+        return televerser(session, serveur, chemin)
+
+    disponibles = catalogue.get(etiquette, [])
+    if valeur in disponibles:
+        print(f"  deja sur le serveur : {valeur}")
+        return valeur
+
+    # Tolerance sur la casse et sur le chemin, pour les noms venus d'un telephone.
+    base = Path(valeur).name
+    for nom in disponibles:
+        if nom.lower() == base.lower():
+            print(f"  deja sur le serveur : {nom}")
+            return nom
+
+    print(f"Introuvable, ni en local ni sur le serveur : {valeur}", file=sys.stderr)
+    if disponibles:
+        print(f"Disponibles cote serveur ({etiquette}) :", file=sys.stderr)
+        for nom in disponibles:
+            print(f"  {nom}", file=sys.stderr)
+    else:
+        print(f"Le serveur ne propose aucun fichier en {etiquette}.", file=sys.stderr)
+    sys.exit(2)
+
+
 def televerser(session, serveur, chemin):
     """Envoie un fichier dans le dossier input du serveur, retourne son nom."""
     chemin = Path(chemin).expanduser().resolve()
-    if not chemin.is_file():
-        print(f"Fichier introuvable : {chemin}", file=sys.stderr)
-        sys.exit(2)
     with chemin.open("rb") as fichier:
         reponse = session.post(
             f"{serveur}/upload/image",
@@ -200,8 +244,12 @@ def main():
                            help="verifie la logique sans reseau puis sort")
     analyseur.add_argument("--serveur", default="http://127.0.0.1:8188",
                            help="adresse du serveur ComfyUI")
-    analyseur.add_argument("--video", help="video source")
-    analyseur.add_argument("--visage", help="image du visage a poser")
+    analyseur.add_argument("--lister", action="store_true",
+                           help="affiche les fichiers deja sur le serveur puis sort")
+    analyseur.add_argument("--video",
+                           help="chemin local a televerser, ou nom deja sur le serveur")
+    analyseur.add_argument("--visage",
+                           help="chemin local a televerser, ou nom deja sur le serveur")
     analyseur.add_argument("--sortie", default="rendu.mp4", help="fichier a ecrire")
     analyseur.add_argument("--modele", default="hyperswap_1a_256.onnx",
                            help="hyperswap_1a_256.onnx ou inswapper_128.onnx")
@@ -225,9 +273,6 @@ def main():
     if arguments.autotest:
         return autotest()
 
-    if not (arguments.video and arguments.visage):
-        analyseur.error("--video et --visage sont obligatoires")
-
     import requests
 
     serveur = arguments.serveur.rstrip("/")
@@ -241,19 +286,40 @@ def main():
         print("En local, demarre-le avec : python3 lancer.py", file=sys.stderr)
         return 2
 
-    audio_present = a_une_piste_audio(arguments.video)
-    if not audio_present:
-        print("  la source n'a pas de piste audio, le rendu sera muet")
-    fps = arguments.fps or images_par_seconde(arguments.video)
+    catalogue = fichiers_serveur(session, serveur)
+
+    if arguments.lister:
+        for etiquette in ("videos", "images"):
+            print(f"\n{etiquette} :")
+            for nom in catalogue.get(etiquette, []) or ["  aucun"]:
+                print(f"  {nom}")
+        return 0
+
+    if not (arguments.video and arguments.visage):
+        print("--video et --visage sont obligatoires. "
+              "Utilise --lister pour voir ce qui est deja en place.", file=sys.stderr)
+        return 2
+
+    print("Entrees")
+    nom_video = resoudre(session, serveur, arguments.video, "videos", catalogue)
+    nom_visage = resoudre(session, serveur, arguments.visage, "images", catalogue)
+
+    # La cadence se lit dans le fichier local. Si la video est deja sur le
+    # serveur, on ne l'a pas sous la main : il faut alors --fps.
+    local_video = Path(arguments.video).expanduser()
+    fps = arguments.fps
+    if fps is None and local_video.is_file():
+        fps = images_par_seconde(local_video)
     if fps is None:
         fps = 25.0
-        print("  cadence illisible, repli sur 25 images par seconde")
+        print("  cadence inconnue, repli sur 25 images par seconde. "
+              "Precise --fps si ta source est differente, sinon l'audio se decale.")
     else:
-        print(f"  cadence source : {fps} images par seconde")
+        print(f"  cadence : {fps} images par seconde")
 
-    print("Televersement")
-    nom_video = televerser(session, serveur, arguments.video)
-    nom_visage = televerser(session, serveur, arguments.visage)
+    audio_present = a_une_piste_audio(local_video) if local_video.is_file() else True
+    if not audio_present:
+        print("  la source n'a pas de piste audio, le rendu sera muet")
 
     workflow = regler_workflow(
         charger_workflow(), nom_video, nom_visage,
