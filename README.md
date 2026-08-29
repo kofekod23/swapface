@@ -114,7 +114,9 @@ python3 piloter.py --serveur https://xxx.trycloudflare.com \
 
 [Ouvrir dans Colab](https://colab.research.google.com/github/kofekod23/swapface/blob/main/colab_swapface.ipynb)
 
-**Ce n'est pas forcement plus rapide.** Voir la section suivante.
+**Ce n'est pas forcement plus rapide.** Sur une source 360p a un visage, une M5
+va plus vite de bout en bout qu'un A100, parce que la part modele est
+minoritaire. Voir « Rendu complet, de bout en bout ».
 
 ## Performances mesurees
 
@@ -122,30 +124,30 @@ Sur MacBook Pro M5, 32 Go, macOS 26.5.2, clip 640x360, un visage par image.
 
 ### Temps d'inference des modeles
 
-```
-modele                             CoreML          CPU      gain
-----------------------------------------------------------------
-detection  det_10g                   44,8         55,7     x1,24
-identite   w600k_r50                  5,2         29,3     x5,58
-swap       inswapper_128            107,2        369,1     x3,44
-swap       hyperswap_1a_256          46,7        159,8     x3,42
+Millisecondes par image, mediane. Deux machines, meme code.
 
-restauration CodeFormer, sur MPS    355,5
-```
+| modele | M5, CoreML | M5, CPU | A100, CUDA |
+|---|---|---|---|
+| detection `det_10g` | 44,8 | 55,7 | **4,0** |
+| identite `w600k_r50` | 5,2 | 29,3 | **2,8** |
+| swap `inswapper_128` | 107,2 | 369,1 | **9,1** |
+| swap `hyperswap_1a_256` | 46,7 | 159,8 | **8,9** |
+| restauration CodeFormer | 355,5 | | **40,8** |
 
 Reproduire : `python3 bench.py`
 
-### Placement sur Metal
+### Quels noeuds tournent vraiment sur l'accelerateur
 
 ```
-modele                           CoreML      CPU   part GPU
-------------------------------------------------------------
-det_10g                               4       11       27 %
-w600k_r50                             1        1       50 %
-inswapper_128                         1        0      100 %
-hyperswap_1a_256                      2       42        5 %
+                        M5, CoreML              A100, CUDA
+modele            accel.   CPU   part      accel.   CPU   part
+---------------------------------------------------------------
+det_10g                4    11    27 %        141    12    92 %
+w600k_r50              2     2    50 %        130     0   100 %
+inswapper_128          1     0   100 %        226     0   100 %
+hyperswap_1a_256       2    42     5 %        526     0   100 %
 
-CodeFormer sous MPS : aucun repli, 100 % Metal
+CodeFormer : aucun repli, ni sur MPS ni sur CUDA
 ```
 
 Reproduire : `python3 diag_gpu.py`
@@ -160,53 +162,90 @@ ComfyUI-ReActor. `--etat` dit ou tu en es, `--restaurer` annule.
 
 ### Rendu complet, de bout en bout
 
-60 images, 640x360, `hyperswap_1a_256`, mesures a chaud.
+60 images, 640x360, `hyperswap_1a_256`, mesures a chaud, deuxieme passage.
 
-| machine | sans restauration | avec CodeFormer 0,7 |
+| | MacBook Pro M5 | Colab A100 40 Go |
 |---|---|---|
-| MacBook Pro M5 | 369 ms par image | 703 ms par image |
-| Colab A100 40 Go | 1084 ms par image | 1153 ms par image |
+| sans restauration | **369 ms** par image | 513 ms par image |
+| avec CodeFormer 0,7 | **703 ms** par image | 744 ms par image |
 
-Ces chiffres Colab sont **faux**, et la raison merite d'etre connue.
+Le Mac gagne, alors que l'A100 est cinq a onze fois plus rapide sur chaque
+modele pris isolement. Ce n'est pas contradictoire, c'est une question de
+proportion. En decomposant :
 
-Pendant ces rendus le GPU de la session n'a montre aucune activite. Le paquet
-`onnxruntime-gpu` etait pourtant bien installe, et `get_available_providers()`
-retournait bien :
+| | part modele | reste | total |
+|---|---|---|---|
+| M5, sans restauration | 97 ms | 272 ms | 369 ms |
+| A100, sans restauration | 16 ms | 497 ms | 513 ms |
+| M5, avec CodeFormer | 452 ms | 251 ms | 703 ms |
+| A100, avec CodeFormer | 57 ms | 688 ms | 744 ms |
+
+Le « reste » est le decodage video, le recadrage du visage, la deformation
+affine, le collage et l'encodage. Rien de tout cela ne touche au GPU : c'est du
+`cv2` et du `numpy`, largement mono-fil. L'accelerateur ne travaille que sur la
+part modele, minoritaire a cette resolution, et le processeur de la session
+Colab est environ deux fois plus lent que celui de la M5 sur ce travail.
+
+**Quand le GPU distant devient rentable :** quand la part modele redevient
+dominante. C'est le cas si tu montes en resolution, si tu traites plusieurs
+visages par image, ou si tu enchaines des restaurations lourdes. Sur une source
+360p a un visage, ta machine gagne, et sans televersement ni facturation.
+
+Extrapolation pour ce clip de 60,4 s, 1810 images, sur le Mac :
+
+| | duree |
+|---|---|
+| sans restauration | environ 11 min |
+| avec CodeFormer 0,7 | environ 21 min |
+
+### Le piege du provider annonce mais inactif
+
+A lire avant de tirer la moindre conclusion de tes propres mesures. Ce piege a
+invalide une premiere serie de chiffres, sur les deux plateformes.
+
+`onnxruntime.get_available_providers()` liste ce que la roue **sait faire**, pas
+ce qui **s'initialise**, ni ce qui **recupere des noeuds du graphe**. Un provider
+peut etre annonce, accepte a la creation de la session, et ne rien faire.
+
+**Sur Mac.** CoreML etait annonce et accepte. Mais sans options, onnxruntime
+utilise le format historique `NeuralNetwork`, qui couvre bien moins
+d'operateurs, et `hyperswap_1a_256` se retrouvait entierement sur CPU, 572
+noeuds sur 572, a 156,5 ms. `optimiser_coreml.py` impose `MLProgram` et
+`CPUAndGPU` : 46,7 ms, un facteur 3.
+
+Ce patch modifie un depot tiers. Relance-le apres chaque mise a jour de
+ComfyUI-ReActor. `--etat` dit ou tu en es, `--restaurer` annule.
+
+**Sur Colab.** `onnxruntime-gpu` etait installe et la liste annoncait bien :
 
 ```
 ['TensorrtExecutionProvider', 'CUDAExecutionProvider', 'CPUExecutionProvider']
 ```
 
-Mais cette fonction liste ce que la roue **sait faire**, pas ce qui **s'initialise**.
-En creant reellement une session, le verdict tombe :
+En creant reellement une session, le verdict tombait :
 
 ```
 providers effectifs : ['CPUExecutionProvider']
 396,3 ms par inference
 ```
 
-`CUDAExecutionProvider` echoue a l'initialisation et onnxruntime bascule sur le
-processeur sans lever d'erreur. Le journal du moteur donne la raison exacte :
+Le journal du moteur, a `log_severity_level = 0`, donne la raison exacte :
 
 ```
 Failed to create CUDAExecutionProvider. Require cuDNN 9.* and CUDA 13.*
 ```
 
-La roue `onnxruntime-gpu` publiee sur PyPI est compilee pour **CUDA 13**, alors
-que Colab tourne en **CUDA 12.8**. `install.py` de ReActor installe cette
-roue-la. Le projet onnxruntime publie une variante CUDA 12 sur un index dedie,
-sous le meme numero de version, et c'est celle qu'il faut. Le notebook
-l'installe par son adresse directe, la resolution de pip etant ambigue entre
-deux index publiant `1.29.0`.
+La roue `onnxruntime-gpu` de PyPI est compilee pour **CUDA 13**, Colab tourne en
+**CUDA 12.8**, et `install.py` de ReActor installe celle de PyPI. Le projet
+onnxruntime publie une variante CUDA 12 sur un index dedie, sous le meme numero
+de version. Le notebook l'installe par son adresse directe, la resolution de pip
+etant ambigue entre deux index publiant `1.29.0`, et avec `--no-deps` puisque cet
+index n'heberge pas les dependances. Apres correction : 8,9 ms.
 
-C'est exactement le meme piege que CoreML sur Mac, ou le provider etait annonce,
-accepte, et ne prenait aucun noeud sur `hyperswap_1a_256`. **La seule preuve est
-le temps mesure.** `diag_gpu.py` fait cette verification sur les deux plateformes.
-
-Ce qui reste vrai sans dependre de ce point : le decodage video, le recadrage,
-le collage et l'encodage tournent sur le processeur quoi qu'il arrive, et les
-deux vCPU d'une session Colab sont plus lents que les dix coeurs d'une M5. Le
-GPU distant n'aide que sur la part modele.
+**La regle.** La liste des providers ne prouve rien. Seul le temps mesure prouve
+quelque chose. C'est pour cela que `diag_gpu.py` chronometre au lieu de se
+contenter d'interroger, et signale explicitement le cas ou un provider demande
+est refuse a l'initialisation.
 
 ## Reglages
 
