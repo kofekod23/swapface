@@ -1,0 +1,22 @@
+# Environnement virtuel
+venv/
+
+# Depots tiers, clones par git, pas versionnes ici
+ComfyUI/
+custom_nodes/
+
+# Modeles et media, jamais dans git
+models/
+input/
+output/
+*.onnx
+*.pth
+*.safetensors
+*.mp4
+*.mov
+
+# Divers
+__pycache__/
+*.pyc
+*.log
+.DS_Store
