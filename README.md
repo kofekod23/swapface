@@ -247,6 +247,41 @@ quelque chose. C'est pour cela que `diag_gpu.py` chronometre au lieu de se
 contenter d'interroger, et signale explicitement le cas ou un provider demande
 est refuse a l'initialisation.
 
+### 403 en ouvrant l'interface
+
+ComfyUI refuse toute requete portant `Sec-Fetch-Site: cross-site`, pour empecher
+un site tiers de remplir ta file de taches (`server.py`, fonction
+`create_origin_only_middleware`). Consequence : le proxy integre de Colab, qui
+sert la page depuis un domaine `googleusercontent.com` et relaie les requetes,
+donne systematiquement un **403**.
+
+Teste contre un tunnel cloudflared :
+
+```
+requete sans en-tete, comme piloter.py      200
+Sec-Fetch-Site: same-origin                 200
+Sec-Fetch-Site: cross-site                  403
+Sec-Fetch-Site: none, ouverture d'onglet    200
+```
+
+Ouvre donc l'URL du tunnel **directement dans un onglet**, jamais dans un cadre
+integre. Le contournement existe, `--enable-cors-header`, mais il desactive la
+protection pour tout le monde sur une URL deja publique.
+
+> Une URL `trycloudflare.com` est publique et sans mot de passe. Quiconque la
+> connait peut mettre des taches dans ta file, envoyer des fichiers et lire tes
+> rendus. Ne la publie pas, et arrete le tunnel quand tu as fini.
+
+### Le GPU semble inactif
+
+Le panneau de ressources de Colab affiche de la **memoire**, pas de
+l'utilisation. Une valeur non nulle en RAM du GPU, de l'ordre de 3 Go, signifie
+que les modeles y sont bien charges.
+
+Une occupation faible est par ailleurs le comportement attendu : le GPU fait
+environ 16 ms de travail par image sur 513, soit 3 %. Il attend le processeur.
+Pour trancher, mesure au lieu de regarder un graphe : `python3 diag_gpu.py`.
+
 ## Reglages
 
 - `hyperswap_1a_256.onnx` sort en 256 px natif contre 128 pour `inswapper_128`.
