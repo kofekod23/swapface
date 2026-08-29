@@ -186,10 +186,18 @@ providers effectifs : ['CPUExecutionProvider']
 ```
 
 `CUDAExecutionProvider` echoue a l'initialisation et onnxruntime bascule sur le
-processeur sans lever d'erreur. Sur Colab, la cause est que `onnxruntime-gpu`
-cherche `libcudnn` et `libcublas` dans les chemins systeme, alors qu'elles y
-arrivent par les paquets pip de PyTorch, dans `site-packages/nvidia/*/lib`.
-Le notebook transmet desormais ces dossiers a ComfyUI par `LD_LIBRARY_PATH`.
+processeur sans lever d'erreur. Le journal du moteur donne la raison exacte :
+
+```
+Failed to create CUDAExecutionProvider. Require cuDNN 9.* and CUDA 13.*
+```
+
+La roue `onnxruntime-gpu` publiee sur PyPI est compilee pour **CUDA 13**, alors
+que Colab tourne en **CUDA 12.8**. `install.py` de ReActor installe cette
+roue-la. Le projet onnxruntime publie une variante CUDA 12 sur un index dedie,
+sous le meme numero de version, et c'est celle qu'il faut. Le notebook
+l'installe par son adresse directe, la resolution de pip etant ambigue entre
+deux index publiant `1.29.0`.
 
 C'est exactement le meme piege que CoreML sur Mac, ou le provider etait annonce,
 accepte, et ne prenait aucun noeud sur `hyperswap_1a_256`. **La seule preuve est
