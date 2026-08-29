@@ -49,6 +49,7 @@ def regler_workflow(workflow, video, visage, options):
     workflow["3"]["inputs"]["face_restore_model"] = options["restauration"]
     workflow["3"]["inputs"]["codeformer_weight"] = options["poids"]
     workflow["4"]["inputs"]["frame_rate"] = options["fps"]
+    workflow["4"]["inputs"]["format"] = options["format"]
     # Une source sans piste audio fait echouer la sortie audio de VHS_LoadVideo.
     # On coupe alors la liaison plutot que de laisser le rendu planter.
     if options.get("sans_audio"):
@@ -88,6 +89,25 @@ def a_une_piste_audio(chemin):
     except Exception:
         return True
     return bool(re.search(r"Stream #\d+:\d+.*: Audio:", sortie))
+
+
+def format_par_defaut(session, serveur):
+    """Sur NVIDIA, l'encodage NVENC se fait par la carte et libere le processeur,
+    qui est le poste limitant du pipeline. Ailleurs, l'encodage logiciel."""
+    voulu = "video/nvenc_h264-mp4"
+    try:
+        stats = session.get(f"{serveur}/system_stats", timeout=60).json()
+        nvidia = any(p.get("type") == "cuda" for p in stats.get("devices", []))
+    except Exception:
+        nvidia = False
+    if not nvidia:
+        return "video/h264-mp4"
+    try:
+        info = session.get(f"{serveur}/object_info/VHS_VideoCombine", timeout=60).json()
+        formats = info["VHS_VideoCombine"]["input"]["required"]["format"][0]
+    except Exception:
+        formats = []
+    return voulu if voulu in formats else "video/h264-mp4"
 
 
 def fichiers_serveur(session, serveur):
@@ -207,7 +227,8 @@ def autotest():
         "b.jpg",
         {"images": 12, "depart": 90, "largeur": 640, "hauteur": 360,
          "modele": "inswapper_128.onnx",
-         "restauration": "codeformer-v0.1.0.pth", "poids": 0.4, "fps": 30.0},
+         "restauration": "codeformer-v0.1.0.pth", "poids": 0.4, "fps": 30.0,
+         "format": "video/nvenc_h264-mp4"},
     )
     assert workflow["1"]["inputs"]["video"] == "a.mp4"
     assert workflow["1"]["inputs"]["frame_load_cap"] == 12
@@ -217,6 +238,7 @@ def autotest():
     assert workflow["3"]["inputs"]["swap_model"] == "inswapper_128.onnx"
     assert workflow["3"]["inputs"]["codeformer_weight"] == 0.4
     assert workflow["4"]["inputs"]["frame_rate"] == 30.0
+    assert workflow["4"]["inputs"]["format"] == "video/nvenc_h264-mp4"
     # Les liaisons ne doivent pas avoir bouge.
     assert workflow["3"]["inputs"]["input_image"] == ["1", 0]
     assert workflow["3"]["inputs"]["source_image"] == ["2", 0]
@@ -227,7 +249,8 @@ def autotest():
         charger_workflow(), "a.mp4", "b.jpg",
         {"images": 5, "depart": 0, "largeur": 640, "hauteur": 360,
          "modele": "inswapper_128.onnx",
-         "restauration": "none", "poids": 0.7, "fps": 25.0, "sans_audio": True},
+         "restauration": "none", "poids": 0.7, "fps": 25.0, "sans_audio": True,
+         "format": "video/h264-mp4"},
     )
     assert "audio" not in muet["4"]["inputs"]
     assert muet["4"]["inputs"]["images"] == ["3", 0]
@@ -265,6 +288,11 @@ def main():
     analyseur.add_argument("--hauteur", type=int, default=720)
     analyseur.add_argument("--fps", type=float, default=None,
                            help="cadence de sortie, lue dans la source par defaut")
+    analyseur.add_argument("--format", default=None,
+                           help="format de sortie. Par defaut video/nvenc_h264-mp4 "
+                                "si le serveur tourne sur NVIDIA, sinon video/h264-mp4. "
+                                "L'encodage NVENC decharge le processeur, qui est le "
+                                "goulot d'etranglement du pipeline")
     analyseur.add_argument("--sans-audio", action="store_true",
                            help="ne pas reprendre l'audio de la source, "
                                 "obligatoire si la source n'a pas de piste audio")
@@ -308,6 +336,7 @@ def main():
               "Utilise --lister pour voir ce qui est deja en place.", file=sys.stderr)
         return 2
 
+    format_sortie = arguments.format or format_par_defaut(session, serveur)
     print("Entrees")
     nom_video = resoudre(session, serveur, arguments.video, "videos", catalogue)
     nom_visage = resoudre(session, serveur, arguments.visage, "images", catalogue)
@@ -335,7 +364,8 @@ def main():
          "largeur": arguments.largeur,
          "hauteur": arguments.hauteur, "modele": arguments.modele,
          "restauration": arguments.restauration, "poids": arguments.poids,
-         "fps": fps, "sans_audio": arguments.sans_audio or not audio_present},
+         "fps": fps, "sans_audio": arguments.sans_audio or not audio_present,
+         "format": format_sortie},
     )
 
     print(f"Rendu : {arguments.modele}, restauration {arguments.restauration}, "

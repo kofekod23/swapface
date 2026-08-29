@@ -86,6 +86,7 @@ L'interface web est sur http://127.0.0.1:8188.
 | `--depart` | `0` | image de depart |
 | `--largeur` `--hauteur` | `1280` `720` | `0` `0` garde la resolution native |
 | `--fps` | lue dans la source | cadence de sortie |
+| `--format` | `nvenc_h264` sur NVIDIA, `h264` sinon | format de sortie. L'encodage NVENC est fait par la carte et libere le processeur, qui est le poste limitant |
 | `--sans-audio` | | detecte tout seul, force le rendu muet |
 
 `--largeur 0 --hauteur 0` est presque toujours le bon choix : agrandir une source
