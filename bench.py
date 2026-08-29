@@ -54,8 +54,14 @@ def mesurer_onnx(chemin, provider, iterations):
 
     options = ort.SessionOptions()
     options.log_severity_level = 3
+    # Memes options que le patch pose par optimiser_coreml.py, pour que le bench
+    # mesure ce que ReActor fera reellement.
+    if provider == "CoreMLExecutionProvider":
+        specification = (provider, {"ModelFormat": "MLProgram", "MLComputeUnits": "CPUAndGPU"})
+    else:
+        specification = provider
     try:
-        session = ort.InferenceSession(str(chemin), options, providers=[provider])
+        session = ort.InferenceSession(str(chemin), options, providers=[specification])
     except Exception as erreur:
         return None, f"session impossible : {erreur}"
 
